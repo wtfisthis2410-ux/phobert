@@ -2,29 +2,21 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import torch
-from transformers import AutoTokenizer
-from model_multihead import MultiHeadPhoBERT
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import os
+import torch.nn.functional as F
 
-MODEL_DIR = os.environ.get("MODEL_DIR", "./distilphobert-checkpoint")
-BASE_MODEL = os.environ.get("BASE_MODEL", "vinai/phobert-base")
+# dùng model fine-tuned trên HF
+MODEL_NAME = os.environ.get("MODEL_NAME", "funa21/phobert-finetuned-victsd-toxic-v2")
 
-# label lists must match training
-BULLYING_LABELS = ["physical","verbal","sexual","social","cyber","none"]
-SEVERITY_LABELS = ["low","medium","high","critical"]
-EMOTION_LABELS = ["neutral","sad","angry","fear","happy","other"]
+# labels từ fine-tuned model (bạn có thể sửa theo model thật)
+LABELS = ["physical","verbal","sexual","social","cyber","none"]
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# load tokenizer
-tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)  # tokenizer saved in checkpoint
-
-# load model (structure must match)
-model = MultiHeadPhoBERT(BASE_MODEL, n_labels_bullying=len(BULLYING_LABELS),
-                         n_labels_severity=len(SEVERITY_LABELS),
-                         n_labels_emotion=len(EMOTION_LABELS))
-# load weights
-model.load_state_dict(torch.load(os.path.join(MODEL_DIR, "pytorch_model.bin"), map_location=device))
+# load tokenizer và model
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
 model.to(device)
 model.eval()
 
@@ -36,18 +28,10 @@ def inference_text(text):
     enc = {k:v.to(device) for k,v in enc.items()}
     with torch.no_grad():
         out = model(**enc)
-    import torch.nn.functional as F
-    probs_b = F.softmax(out["logits_bullying"], dim=-1)[0].cpu().numpy()
-    probs_s = F.softmax(out["logits_severity"], dim=-1)[0].cpu().numpy()
-    probs_e = F.softmax(out["logits_emotion"], dim=-1)[0].cpu().numpy()
-
+    probs = F.softmax(out.logits, dim=-1)[0].cpu().numpy()
     return {
-        "bullying_label": BULLYING_LABELS[int(probs_b.argmax())],
-        "bullying_probs": probs_b.tolist(),
-        "severity": SEVERITY_LABELS[int(probs_s.argmax())],
-        "severity_probs": probs_s.tolist(),
-        "emotion": EMOTION_LABELS[int(probs_e.argmax())],
-        "emotion_probs": probs_e.tolist(),
+        "label": LABELS[int(probs.argmax())],
+        "probs": probs.tolist()
     }
 
 @app.route("/predict", methods=["POST"])
