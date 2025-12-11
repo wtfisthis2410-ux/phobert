@@ -4,3 +4,4 @@ datasets
 flask
 flask-cors
 accelerate
+python-dotenv
